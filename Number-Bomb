@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="数字炸弹：破解敌方阵营的 3–6 位引爆密码，每次只告诉你位置和数字都对的位数。">
+<meta name="theme-color" content="#282C34">
+<title>数字炸弹</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* page shell: what the artifact host used to provide */
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+
+/* Layout: one narrow column — a defusal device (LED screen + keypad) on top, the guess log below it, like a field manual page. */
+/* One Dark: a single committed dark look. Blue-grey for normal play, blue for actions,
+   yellow for the important digits, green for correct, orange for warnings, red only for the bomb. */
+:root {
+  color-scheme: dark;
+  --bg: #282C34;        /* page background */
+  --ink: #FFFFFF;       /* main text */
+  --muted: #ABB2BF;     /* secondary text */
+  --line: #3E4451;      /* dividers */
+  --paper: #21252B;     /* panels */
+  --wire: #E06C75;      /* bomb red: the wire, danger only */
+  --primary: #61AFEF;   /* confirm, selected */
+  --warn: #D19A66;      /* warnings */
+  --on-primary: #21252B;
+  /* device */
+  --case: #21252B;
+  --case-hi: #3E4451;
+  --case-ink: #ABB2BF;
+  --screen: #1B1F25;
+  --led: #E5C07B;       /* important digits */
+  --led-dim: #353530;
+  --led-glow: rgba(229, 192, 123, .40);
+  --ok: #98C379;        /* correct / success */
+  --ok-glow: rgba(152, 195, 121, .45);
+  --key: #3E4451;
+  --key-hi: #4B5263;
+  --win-veil: rgba(27, 31, 37, .90);
+  --win-ink: #FFFFFF;
+  --win-dim: #ABB2BF;
+
+  --f-display: "Saira Stencil One", Impact, "Arial Black", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --f-body: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 48px;
+}
+.wrap { max-width: 540px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 {
+  font-family: var(--f-display); font-weight: 400;
+  font-size: clamp(40px, 11vw, 58px); line-height: .9; margin: 0; letter-spacing: .02em;
+  text-wrap: balance;
+}
+h1 span { color: var(--wire); }
+.tag { font-family: var(--f-mono); font-size: 12px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---------- device ---------- */
+.device {
+  background: var(--case);
+  color: var(--case-ink);
+  border-radius: 14px;
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 16px;
+  box-shadow: inset 0 1px 0 var(--case-hi), 0 10px 30px -14px rgba(0,0,0,.6);
+  position: relative;
+}
+.device::before {
+  /* the red wire running across the top */
+  content: ""; position: absolute; left: 22px; right: 22px; top: -4px; height: 6px;
+  border-radius: 3px; background: var(--wire);
+  box-shadow: 0 2px 0 rgba(0,0,0,.25);
+}
+.plate { display: flex; justify-content: space-between; align-items: center; font-family: var(--f-mono); font-size: 11px; letter-spacing: .12em; gap: 8px; flex-wrap: wrap; }
+.plate > span { opacity: .75; }
+
+/* difficulty: a rotary-style selector of digit count */
+.level { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; }
+.level legend { float: left; padding: 0; margin-right: 8px; opacity: .75; }
+.level .opts { display: inline-flex; background: var(--screen); border-radius: 7px; padding: 3px; gap: 2px; }
+.level input { position: absolute; opacity: 0; pointer-events: none; }
+.level label {
+  font: 600 13px var(--f-mono); letter-spacing: 0; min-width: 34px; text-align: center;
+  padding: 4px 8px; border-radius: 5px; cursor: pointer; color: var(--case-ink); opacity: .7;
+}
+.level input:checked + label { background: var(--primary); color: var(--on-primary); opacity: 1; }
+.level input:focus-visible + label { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.screen {
+  background: var(--screen);
+  border-radius: 8px;
+  padding: 16px 14px 12px;
+  box-shadow: inset 0 2px 10px rgba(0,0,0,.8);
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.digits { --len: 4; display: grid; grid-template-columns: repeat(var(--len), 1fr); gap: 8px; width: 100%; max-width: calc(var(--len) * 84px); }
+.digit {
+  position: relative; text-align: center;
+  font-family: var(--f-mono); font-weight: 600;
+  font-size: clamp(30px, calc(60vw / var(--len)), 64px); line-height: 1.1;
+  color: var(--led); text-shadow: 0 0 14px var(--led-glow);
+  border-bottom: 2px solid var(--led-dim);
+  font-variant-numeric: tabular-nums;
+}
+.digit::before { content: "8"; position: absolute; inset: 0; color: var(--led-dim); text-shadow: none; z-index: 0; }
+.digit.filled::before { content: none; }
+.digit b { position: relative; z-index: 1; font-weight: inherit; }
+.digit.cursor { border-bottom-color: var(--led); }
+.screen.won .digit { color: var(--ok); text-shadow: 0 0 14px var(--ok-glow); }
+.screen.won .digit.cursor, .screen.won .digit { border-bottom-color: var(--ok); }
+.screen.shake { animation: shake .32s; }
+@keyframes shake { 20%,60% { transform: translateX(-5px); } 40%,80% { transform: translateX(5px); } }
+
+.readout { display: flex; align-items: center; justify-content: center; width: 100%; max-width: 340px; flex-wrap: wrap; gap: 10px; font-family: var(--f-mono); font-size: 13px; color: var(--muted); min-height: 22px; }
+.screen.won .readout { color: var(--ok); }
+.readout .warn, #status.warn { color: var(--warn); }
+
+.lamps { display: inline-flex; gap: 6px; }
+.lamp { width: 12px; height: 12px; border-radius: 50%; background: var(--led-dim); }
+.lamp.on { background: var(--led); box-shadow: 0 0 8px var(--led); }
+.lamps.win .lamp.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.key {
+  font-family: var(--f-mono); font-size: 22px; font-weight: 600;
+  background: var(--key); color: var(--case-ink);
+  border: 0; border-radius: 8px; padding: 12px 0;
+  box-shadow: inset 0 1px 0 var(--key-hi), 0 3px 0 rgba(0,0,0,.35);
+  cursor: pointer; touch-action: manipulation;
+  transition: transform .06s, box-shadow .06s;
+}
+.key:active { transform: translateY(2px); box-shadow: inset 0 1px 0 var(--key-hi), 0 1px 0 rgba(0,0,0,.35); }
+.key:focus-visible, .btn:focus-visible, summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.key.small { font-size: 15px; font-family: var(--f-body); font-weight: 600; }
+.key.go { background: var(--primary); color: var(--on-primary); }
+.key:disabled { opacity: .4; cursor: default; }
+
+.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  flex: 1 1 auto;
+  font: 600 14px var(--f-body);
+  background: transparent; color: var(--case-ink);
+  border: 1px solid var(--case-hi); border-radius: 8px;
+  padding: 9px 12px; cursor: pointer;
+}
+.btn:hover { background: var(--case-hi); }
+.btn.danger { color: var(--wire); }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+
+/* ---------- page sections ---------- */
+section h2 { font: 600 12px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; display: flex; justify-content: space-between; gap: 8px; }
+
+.log { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.log li {
+  display: grid; grid-template-columns: 2.5em auto 1fr auto; align-items: center; gap: 14px;
+  padding: 9px 2px; border-bottom: 1px solid var(--line);
+  font-family: var(--f-mono); font-variant-numeric: tabular-nums;
+}
+.log .n { color: var(--muted); font-size: 13px; }
+.log .g { font-size: 20px; font-weight: 600; letter-spacing: .18em; }
+.log .r { color: var(--muted); font-size: 13px; text-align: right; font-family: var(--f-body); }
+.log .lamp { width: 10px; height: 10px; background: var(--line); }
+.log .lamp.on { background: var(--ok); box-shadow: none; }
+.log li.hit .g { color: var(--ok); }
+.log .empty { grid-column: 1 / -1; display: block; color: var(--muted); font-family: var(--f-body); font-size: 14px; }
+
+.hint { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+.hint label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.hint output { font-family: var(--f-mono); color: var(--ink); }
+
+.proof { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+.proof code { font-family: var(--f-mono); font-size: 12px; color: var(--ink); word-break: break-all; }
+.proof .verdict { color: var(--ink); font-weight: 600; }
+
+details { border-top: 1px solid var(--line); padding-top: 10px; }
+summary { cursor: pointer; font: 600 12px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+details ul { margin: 10px 0 0; padding-left: 1.2em; max-width: 62ch; }
+details li { margin-bottom: 4px; }
+details .proof { margin-top: 12px; }
+.ex { font-family: var(--f-mono); }
+
+.brief { flex-basis: 100%; margin: 4px 0 0; font-size: 14px; color: var(--muted); max-width: 62ch; }
+
+/* ---------- WIN overlay: always a dark veil, so its colors are fixed rather than themed ---------- */
+.win {
+  position: fixed; inset: 0; z-index: 50;
+  display: grid; place-items: center; overflow-y: auto;
+  background: var(--win-veil);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+}
+.win canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.win-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--win-ink); max-width: 420px; }
+.win-word {
+  font-family: var(--f-display); font-size: clamp(64px, min(34vw, 26vh), 210px); line-height: .82; letter-spacing: .04em;
+  color: var(--ok); text-shadow: 0 0 28px var(--ok-glow), 0 6px 0 var(--paper);
+  animation: stamp .55s cubic-bezier(.2,1.6,.4,1) both;
+}
+.win-sub { font: 600 20px var(--f-body); letter-spacing: .08em; animation: rise .4s .35s both; }
+.win-meta { font-family: var(--f-mono); font-size: 14px; color: var(--win-dim); animation: rise .4s .5s both; }
+.win-meta b { color: var(--led); font-weight: 600; letter-spacing: .12em; }
+.win-record { font: 600 13px var(--f-mono); letter-spacing: .14em; color: var(--screen); background: var(--ok); padding: 3px 10px; border-radius: 4px; animation: rise .4s .6s both; }
+.win-actions { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; justify-content: center; animation: rise .4s .7s both; }
+.win-actions .btn { flex: 0 1 auto; min-width: 120px; color: var(--win-ink); border-color: var(--win-dim); }
+.win-actions .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.win.flash::after { content: ""; position: absolute; inset: 0; background: var(--ok); opacity: 0; animation: flash .5s ease-out; pointer-events: none; }
+@keyframes stamp { 0% { transform: scale(2.6) rotate(-8deg); opacity: 0; } 60% { opacity: 1; } 100% { transform: scale(1) rotate(-4deg); opacity: 1; } }
+@keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes flash { 0% { opacity: .45; } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen.shake { animation: none; } .key { transition: none; }
+  .win-word, .win-sub, .win-meta, .win-record, .win-actions { animation: none; }
+  .win.flash::after { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>数字<span>炸弹</span></h1>
+    <div class="tag" id="bestTag">0–9 · 可重复</div>
+    <p class="brief">任务：破解敌方阵营的引爆密码。全部位猜中，敌方阵营即被击溃。</p>
+  </header>
+
+  <div class="device" aria-label="拆弹装置">
+    <div class="plate">
+      <fieldset class="level" id="level">
+        <legend>难度</legend>
+        <span class="opts">
+          <input type="radio" name="len" id="len3" value="3"><label for="len3">3</label>
+          <input type="radio" name="len" id="len4" value="4" checked><label for="len4">4</label>
+          <input type="radio" name="len" id="len5" value="5"><label for="len5">5</label>
+          <input type="radio" name="len" id="len6" value="6"><label for="len6">6</label>
+        </span>
+      </fieldset>
+      <span id="attemptPlate">第 1 次</span>
+    </div>
+    <div class="confirm" id="confirmLen" hidden>
+      <span id="confirmLenText">换成 5 位会放弃当前这局，确定？</span>
+      <button class="btn danger" id="lenYes" type="button">换</button>
+      <button class="btn" id="lenNo" type="button">继续这局</button>
+    </div>
+
+    <div class="screen" id="screen">
+      <div class="digits" id="digits" aria-live="polite"></div>
+      <div class="readout">
+        <span id="status">输入 4 位数字</span>      </div>
+    </div>
+
+    <div class="keypad" id="keypad"></div>
+
+    <div class="controls" id="controls">
+      <button class="btn" id="newBtn" type="button">新开一局</button>
+      <button class="btn danger" id="giveBtn" type="button">放弃并揭晓</button>
+    </div>
+    <div class="confirm" id="confirmGive" hidden>
+      <span>确定放弃？密码会直接公布。</span>
+      <button class="btn danger" id="giveYes" type="button">放弃</button>
+      <button class="btn" id="giveNo" type="button">继续玩</button>
+    </div>
+  </div>
+
+  <section>
+    <h2><span>猜测记录</span><span id="count">0 次</span></h2>
+    <ul class="log" id="log"></ul>
+  </section>
+
+  <div class="hint">
+    <label><input type="checkbox" id="showLeft"> 显示剩余可能</label>
+    <output id="leftOut" hidden></output>
+  </div>
+
+  <div class="win" id="win" role="dialog" aria-modal="true" aria-labelledby="winWord" hidden>
+    <canvas id="confetti" aria-hidden="true"></canvas>
+    <div class="win-card">
+      <div class="win-word" id="winWord">WIN</div>
+      <div class="win-sub">敌方阵营已被击溃</div>
+      <div class="win-meta" id="winMeta"></div>
+      <div class="win-record" id="winRecord" hidden>新纪录</div>
+      <div class="win-actions">
+        <button class="btn primary" id="winAgain" type="button">再战一局</button>      </div>
+    </div>
+  </div>
+
+  <details id="rules">
+    <summary>规则</summary>
+    <ul>
+      <li>先选难度：密码可以是 3 到 6 位，默认 4 位。位数越多越难。</li>
+      <li>开局随机生成密码，每位 0–9，可以重复，首位可以是 0。整局不变。</li>
+      <li>每次猜一个同样位数的数字，只告诉你<strong>数字和位置都对</strong>的有几位。数字对但位置不对不算。</li>
+      <li>例：密码 <span class="ex">0064</span>，猜 <span class="ex">0044</span> → 3 位；猜 <span class="ex">4600</span> → 0 位。</li>
+      <li>全部位都对就成功破解，敌方阵营被击溃，你获胜。可以用键盘直接输入数字，回车提交，退格删除。</li>
+      <li>最佳纪录按位数分别记录。</li>
+      <li>密码只存在你自己的浏览器里，每个打开链接的人各玩各的一局。</li>
+    </ul>
+    <div class="proof" id="proof">
+      <div>开局承诺 <span class="ex">sha256(密码:盐)</span>，用来证明密码整局没换过：</div>
+      <code id="hashOut">计算中…</code>
+      <div id="revealBox" hidden>
+        <div>密码 <code id="secretOut"></code> · 盐 <code id="saltOut"></code></div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+    </div>
+  </details>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let S; // game state
+
+  const randDigit = () => {
+    const b = new Uint8Array(1);
+    do { crypto.getRandomValues(b); } while (b[0] >= 250);
+    return String(b[0] % 10);
+  };
+  const randHex = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), x => x.toString(16).padStart(2, "0")).join("");
+  async function sha256(text) {
+    if (!crypto.subtle) return null;
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf), x => x.toString(16).padStart(2, "0")).join("");
+  }
+  const score = (g, s) => { let n = 0; for (let i = 0; i < s.length; i++) if (g[i] === s[i]) n++; return n; };
+  const MIN_LEN = 3, MAX_LEN = 6;
+  const clampLen = n => Math.min(MAX_LEN, Math.max(MIN_LEN, Number(n) || 4));
+
+  function lampsHTML(n, len, win) {
+    return `<span class="lamps${win ? " win" : ""}">` + Array.from({ length: len }, (_, i) => `<span class="lamp${i < n ? " on" : ""}"></span>`).join("") + `</span>`;
+  }
+
+  function readBest(len) { try { return Number(localStorage.getItem(`nb-best-${len}`)) || 0; } catch { return 0; } }
+  function writeBest(len, n) { try { localStorage.setItem(`nb-best-${len}`, String(n)); } catch {} }
+  function readLen() { try { return clampLen(localStorage.getItem("nb-len")); } catch { return 4; } }
+  function writeLen(n) { try { localStorage.setItem("nb-len", String(n)); } catch {} }
+
+  async function newGame(len = S?.len ?? readLen()) {
+    len = clampLen(len);
+    writeLen(len);
+    const secret = Array.from({ length: len }, randDigit).join("");
+    const salt = randHex(8);
+    S = { len, secret, salt, hash: null, history: [], input: "", done: false, gaveUp: false };
+    $("confirmGive").hidden = true; $("controls").hidden = false; $("confirmLen").hidden = true;
+    render();
+    S.hash = await sha256(`${secret}:${salt}`);
+    render();
+  }
+
+  function remaining() {
+    let c = 0;
+    const total = 10 ** S.len;
+    for (let k = 0; k < total; k++) {
+      const s = String(k).padStart(S.len, "0");
+      if (S.history.every(h => score(h.g, s) === h.n)) c++;
+    }
+    return c;
+  }
+
+  function type(d) {
+    if (S.done || S.input.length >= S.len) return;
+    S.input += d; render();
+  }
+  function back() { if (S.done) return; S.input = S.input.slice(0, -1); render(); }
+  function submit() {
+    if (S.done) return;
+    if (S.input.length < S.len) {
+      $("screen").classList.remove("shake"); void $("screen").offsetWidth; $("screen").classList.add("shake");
+      $("status").textContent = `还差 ${S.len - S.input.length} 位`; $("status").classList.add("warn");
+      return;
+    }
+    const g = S.input, n = score(g, S.secret);
+    S.history.push({ g, n });
+    S.input = "";
+    let newBest = false;
+    if (n === S.len) {
+      S.done = true;
+      const best = readBest(S.len);
+      if (!best || S.history.length < best) { writeBest(S.len, S.history.length); newBest = true; }
+    }
+    render();
+    if (S.done) celebrate(newBest);
+  }
+
+  // ---------- WIN celebration ----------
+  let confettiRun = 0;
+  function celebrate(newBest) {
+    $("winMeta").innerHTML = `用 ${S.history.length} 次破解 ${S.len} 位密码 <b>${S.secret}</b>`;
+    $("winRecord").hidden = !newBest;
+    const win = $("win");
+    win.hidden = false;
+    win.classList.remove("flash"); void win.offsetWidth; win.classList.add("flash");
+    $("winAgain").focus();
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) burst();
+  }
+  function closeWin() {
+    $("win").hidden = true;
+    confettiRun++;
+  }
+  function burst() {
+    const run = ++confettiRun;
+    const cv = $("confetti"), ctx = cv.getContext("2d");
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.scale(dpr, dpr);
+    const css = getComputedStyle(document.documentElement);
+    const colors = ["--primary", "--ok", "--led", "--warn"].map(v => css.getPropertyValue(v).trim());
+    const parts = Array.from({ length: 160 }, (_, i) => {
+      const fromLeft = i % 2 === 0;
+      const a = (fromLeft ? -1 : -2.14) + (Math.random() - .5) * .6;
+      const sp = 9 + Math.random() * 9;
+      return {
+        x: fromLeft ? 0 : W, y: H * .75,
+        vx: Math.cos(a) * sp * (fromLeft ? 1 : 1), vy: Math.sin(a) * sp,
+        w: 6 + Math.random() * 6, h: 3 + Math.random() * 4,
+        r: Math.random() * 6, vr: (Math.random() - .5) * .4,
+        c: colors[i % colors.length]
+      };
+    });
+    const t0 = performance.now();
+    (function frame(now) {
+      if (run !== confettiRun) { ctx.clearRect(0, 0, W, H); return; }
+      const t = now - t0;
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - 2600) / 900);
+      for (const p of parts) {
+        p.vy += .32; p.vx *= .99; p.vy *= .99;
+        p.x += p.vx; p.y += p.vy; p.r += p.vr;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+        ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h * Math.abs(Math.cos(p.r * 2)) + 1);
+        ctx.restore();
+      }
+      if (t < 3500) requestAnimationFrame(frame); else ctx.clearRect(0, 0, W, H);
+    })(t0);
+  }
+
+  let pendingLen = null;
+  function chooseLen(len) {
+    len = clampLen(len);
+    if (len === S.len) return;
+    if (S.history.length && !S.done) {
+      pendingLen = len;
+      $("confirmLenText").textContent = `换成 ${len} 位会放弃当前这局，确定？`;
+      $("confirmLen").hidden = false;
+      $(`len${S.len}`).checked = true;
+      return;
+    }
+    newGame(len);
+  }
+  async function giveUp() {
+    S.done = true; S.gaveUp = true; S.input = "";
+    $("confirmGive").hidden = true; $("controls").hidden = false;
+    render();
+  }
+
+  async function render() {
+    const won = S.done && !S.gaveUp;
+    const L = S.len;
+    $("status").classList.remove("warn");
+    $(`len${L}`).checked = true;
+    const shown = S.done ? S.secret : S.input.padEnd(L, " ");
+    $("digits").style.setProperty("--len", L);
+    $("digits").innerHTML = [...shown].map((ch, i) =>
+      `<span class="digit${ch !== " " ? " filled" : ""}${!S.done && i === S.input.length ? " cursor" : ""}"><b>${ch === " " ? "&nbsp;" : ch}</b></span>`).join("");
+    $("screen").classList.toggle("won", won);
+
+    const last = S.history[S.history.length - 1];
+    if (won) $("status").textContent = `敌方已击溃 · 共 ${S.history.length} 次`;
+    else if (S.gaveUp) $("status").textContent = "已撤退 · 这是敌方密码";
+    else if (S.input.length === 0 && last) $("status").textContent = `${last.g} → ${last.n} 位正确`;
+    else if (S.input.length < L) $("status").textContent = `输入 ${L} 位数字`;
+    else $("status").textContent = "按「提交」确认";
+
+    $("attemptPlate").textContent = S.done ? "已结束" : `第 ${S.history.length + 1} 次`;
+    const best = readBest(L);
+    $("bestTag").textContent = best ? `${L} 位最佳 ${best} 次` : `${L} 位 · 0–9 · 可重复`;
+
+    // keypad
+    const keys = ["1","2","3","4","5","6","7","8","9","del","0","go"];
+    $("keypad").innerHTML = keys.map(k =>
+      k === "del" ? `<button class="key small" data-k="del" type="button" aria-label="删除" ${S.done ? "disabled" : ""}>删除</button>` :
+      k === "go"  ? `<button class="key small go" data-k="go" type="button" ${S.done ? "disabled" : ""}>提交</button>` :
+                    `<button class="key" data-k="${k}" type="button" ${S.done ? "disabled" : ""}>${k}</button>`).join("");
+    $("giveBtn").hidden = S.done;
+
+    // log
+    $("count").textContent = `${S.history.length} 次`;
+    $("log").innerHTML = S.history.length
+      ? S.history.map((h, i) => `<li class="${h.n === L ? "hit" : ""}"><span class="n">#${i + 1}</span><span class="g">${h.g}</span>${lampsHTML(h.n, L)}<span class="r">${h.n === L ? "全对" : h.n + " 位正确"}</span></li>`).reverse().join("")
+      : `<li><span class="empty">还没有猜测。试试先输入 ${"0".repeat(L)}，看看密码里有几位是 0。</span></li>`;
+
+    // remaining
+    const show = $("showLeft").checked && !S.done;
+    $("leftOut").hidden = !show;
+    if (show) $("leftOut").textContent = `符合所有反馈的密码还剩 ${remaining()} 个`;
+
+    // proof
+    $("hashOut").textContent = S.hash || (crypto.subtle ? "计算中…" : "当前浏览器不支持 SHA-256");
+    $("revealBox").hidden = !S.done;
+    if (S.done) {
+      $("secretOut").textContent = S.secret;
+      $("saltOut").textContent = S.salt;
+      const again = await sha256(`${S.secret}:${S.salt}`);
+      $("verdict").textContent = again && again === S.hash ? "重新计算的哈希与开局承诺一致 ✓" : "";
+    }
+  }
+
+  $("keypad").addEventListener("click", e => {
+    const k = e.target.closest("[data-k]")?.dataset.k;
+    if (!k) return;
+    if (k === "del") back(); else if (k === "go") submit(); else type(k);
+  });
+  document.addEventListener("keydown", e => {
+    if (!$("win").hidden) { if (e.key === "Escape") closeWin(); return; }
+    if (e.target.matches("input, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^[0-9]$/.test(e.key)) { type(e.key); e.preventDefault(); }
+    else if (e.key === "Backspace") { back(); e.preventDefault(); }
+    else if (e.key === "Enter") { submit(); e.preventDefault(); }
+  });
+  $("newBtn").addEventListener("click", () => newGame());
+  $("winAgain").addEventListener("click", () => { closeWin(); newGame(); });
+  $("win").addEventListener("click", e => { if (!e.target.closest(".win-actions")) closeWin(); });
+  $("level").addEventListener("change", e => { if (e.target.name === "len") chooseLen(e.target.value); });
+  $("lenYes").addEventListener("click", () => { if (pendingLen) newGame(pendingLen); pendingLen = null; });
+  $("lenNo").addEventListener("click", () => { pendingLen = null; $("confirmLen").hidden = true; });
+  $("giveBtn").addEventListener("click", () => { $("controls").hidden = true; $("confirmGive").hidden = false; });
+  $("giveNo").addEventListener("click", () => { $("confirmGive").hidden = true; $("controls").hidden = false; });
+  $("giveYes").addEventListener("click", giveUp);
+  $("showLeft").addEventListener("change", render);
+
+  window.claude?.hot?.snapshot?.(() => S);
+  function start(data) {
+    if (data && typeof data.secret === "string") {
+      const len = data.len ?? data.secret.length;
+      if (len >= MIN_LEN && len <= MAX_LEN && data.secret.length === len) { S = { ...data, len }; render(); return; }
+    }
+    newGame(readLen());
+  }
+  window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
+</body>
+</html>
